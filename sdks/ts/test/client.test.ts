@@ -126,6 +126,38 @@ describe('createStellarBillClient - configuration', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('falls back to a warning and preserves the request when localhost URL parsing fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fetch, calls } = mockFetchOnce({ status: 'ok', service: 'stellarbill-backend' });
+    const NativeURL = globalThis.URL;
+    let parseCount = 0;
+
+    vi.stubGlobal('URL', class extends NativeURL {
+      constructor(input: string | URL, base?: string | URL) {
+        parseCount += 1;
+        if (parseCount === 2) throw new TypeError('URL parser unavailable');
+        super(input, base);
+      }
+    });
+
+    try {
+      const sdk = createStellarBillClient({
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        fetch,
+      });
+      const result = await sdk.getHealth();
+
+      expect(result.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe('http://localhost:8080/api/health');
+      expect(callHeaders(calls[0]!)['authorization']).toBe('Bearer test-token');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Insecure baseUrl'));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('throws StellarBillConfigError when no fetch implementation is available', () => {
     const saved = (globalThis as { fetch?: unknown }).fetch;
     (globalThis as { fetch?: unknown }).fetch = undefined;
